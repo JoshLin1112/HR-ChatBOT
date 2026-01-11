@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.env
+
+# JavaScript / Node
+node_modules/
+dist/
+build/
+.npm
+.eslintcache
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.bak
+
+# Data / CSV (Excluded from repo)
+QA617.csv
+QAtest.csv
+QAtest_results.csv
+backend/data/QA617.csv
+improve.txt
