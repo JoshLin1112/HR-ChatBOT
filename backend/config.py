@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     
     # LLM Settings
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "ministral-3:4b"
+    OLLAMA_MODEL: str = "ministral-3:3b"
     REWRITER_TEMPERATURE: float = 0.3
     GENERATOR_TEMPERATURE: float = 0.4
     
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     SIMILARITY_THRESHOLD: float = 0.4
     
     # Data Settings
-    DATA_PATH: str = r"backend\data\QA617.csv"
+    DATA_PATH: str = r"backend\data\sample_data.csv"
 
     model_config = SettingsConfigDict(
         env_file=".env", 

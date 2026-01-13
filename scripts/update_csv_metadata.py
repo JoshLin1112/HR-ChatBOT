@@ -12,7 +12,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_PATH = os.path.join(BASE_DIR, "backend", "data", "QA617.csv")
 
 def categorize_question(row):
-    text = str(row['問題']) + " " + str(row['答案'])
+    text = str(row['question']) + " " + str(row['answer'])
     
     # Priority matching
     if any(k in text for k in ['陪產', '陪產檢']):

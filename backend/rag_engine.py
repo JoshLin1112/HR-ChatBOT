@@ -37,17 +37,17 @@ class RAGComponents:
         try:
             data_path = settings.get_absolute_data_path()
             logger.info(f"Loading data from: {data_path}")
-            data = pd.read_csv(data_path, usecols=['問題', '答案', 'category'])
+            data = pd.read_csv(data_path, usecols=['question', 'answer', 'category'])
             
             self.documents = []
             for _, row in data.iterrows():
-                if not isinstance(row["問題"], str):
+                if not isinstance(row["question"], str):
                     continue
                 self.documents.append(
                     Document(
-                        page_content=f"問題: {row['問題']}",
+                        page_content=f"問題: {row['question']}",
                         metadata={
-                            "answer": row["答案"],
+                            "answer": row["answer"],
                             "category": row.get("category", "other")
                         }
                     )
@@ -87,7 +87,7 @@ class RAGComponents:
             base_retriever=self.base_retriever
         )
         logger.info("Reranker setup complete")
-        def _setup_llms(self):
+    def _setup_llms(self):
         """設定 LLM"""
         logger.info("Setting up LLMs...")
         

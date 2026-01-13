@@ -3,28 +3,27 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_ollama import ChatOllama
 from langdetect import detect
-from opencc import OpenCC
 import json
 import logging
 from typing import Literal
 from .models import GraphState
 from .rag_engine import RAGComponents
 from .config import settings
+import opencc
 from .prompts import (
     CLASSIFICATION_PROMPT,
     CLARIFICATION_PROMPT,
     REWRITE_PROMPT_RETRY,
     REWRITE_PROMPT_NORMAL,
-
-GENERATE_SYSTEM_PROMPT,
-    GUARDRAIL_PROMPT
+    GENERATE_SYSTEM_PROMPT,
+    GUARDRAIL_PROMPT,
+    OPTIMIZE_RESPONSE_PROMPT
 )
 
 
-cc = OpenCC('s2t')
 logger = logging.getLogger(__name__)
 
 class GraphBuilder:
@@ -50,6 +49,13 @@ class GraphBuilder:
         # Guardrail Chain (LLM-based)
         guardrail_prompt = ChatPromptTemplate.from_template(GUARDRAIL_PROMPT)
         self.guardrail_chain = guardrail_prompt | self.model | StrOutputParser()
+        
+        # Optimization Chain
+        optimization_prompt = ChatPromptTemplate.from_template(OPTIMIZE_RESPONSE_PROMPT)
+        self.optimization_chain = optimization_prompt | self.model | StrOutputParser()
+        
+        # Initialize OpenCC for Simplified to Traditional conversion
+        self.cc = opencc.OpenCC('s2t')
     
     def _format_messages_to_str(self, messages) -> str:
         """Helper to format messages into a string history for rewriter/generator"""
@@ -371,52 +377,53 @@ class GraphBuilder:
             logger.info("Tool usage confirmed, switching to tools node")
             return "tools"
         else:
-            logger.info("No tool calls, generation complete")
-            return END
+            logger.info("No tool calls, generation complete, proceeding to optimization")
+            return "optimize"
+
+    def optimize_response_node(self, state: GraphState) -> GraphState:
+        """節點: 回答優化 (格式、語言、結尾)"""
+        logger.info("Executing response optimization...")
+        
+        final_answer = state.get("final_answer")
+        
+        # Fallback if final_answer is missing but last message is likely the answer
+        if not final_answer:
+            messages = state.get("messages", [])
+            if messages and isinstance(messages[-1], AIMessage):
+                final_answer = messages[-1].content
+        
+        if not final_answer:
+             logger.warning("No answer to optimize.")
+             return {}
+
+        try:
+            response = self.optimization_chain.invoke({"answer": final_answer})
+            
+            # Parse JSON response
+            try:
+                data = json.loads(response)
+                # Get the optimized answer, or fallback to the whole response if key missing
+                optimized_answer = data.get("optimized_answer") or data.get("response", response)
+                
+                # If for some reason the value is not a string (e.g. nested dict), convert to string
+                if not isinstance(optimized_answer, str):
+                    optimized_answer = str(optimized_answer)
+                    
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse optimization JSON, using raw response: {response[:50]}...")
+                optimized_answer = response
+
+            # Ensure Traditional Chinese
+            optimized_answer = self.cc.convert(optimized_answer)
+
+            logger.info("Response optimized successfully.")
+            return {"final_answer": optimized_answer}
+        except Exception as e:
+            logger.error(f"Optimization failed: {e}")
+            return {"final_answer": final_answer + "\n\n若有其他需求歡迎詢問"}
 
     # 此節點暫不使用
-    def postprocess_language_node(self, state: GraphState) -> GraphState:
-        """
-        語言品質防火牆：
-        1. 偵測簡體 / 非預期語言
-        2. 偵測亂碼
-        3. 修復或轉換
-        """
-        logger.info("Executing language post-processing...")
 
-        answer = state.get("final_answer", "")
-        if not answer:
-            return {}
-
-        flags = {
-            "converted_s2t": False,
-            "illegal_characters": False,
-            "language_fixed": False
-        }
-
-        # 偵測語言
-        try:
-            lang = detect(answer)
-            logger.debug(f"Detected language: {lang}")
-        except Exception:
-            lang = "unknown"
-
-        # 簡體 → 繁體（只要 detect 是 zh 或包含明显简体）
-        if lang.startswith("zh"):
-            converted = cc.convert(answer)
-            if converted != answer:
-                answer = converted
-                flags["converted_s2t"] = True
-                logger.info("Converted SC to TC")
-
-        # 修補中英混雜（簡單版）
-        answer = re.sub(r"未-?than", "未滿", answer)
-
-        flags["language_fixed"] = flags["converted_s2t"] or flags["illegal_characters"]
-
-        return {
-            "final_answer": answer
-        }
 
     def build(self):
         """建立 LangGraph 工作流程"""
@@ -433,6 +440,7 @@ class GraphBuilder:
         workflow.add_node("generate", self.generate_node)
         workflow.add_node("tools", ToolNode(self.rag_engine.tools))
         workflow.add_node("increment_count", self.increment_tool_count)  # 新增
+        workflow.add_node("optimize_response", self.optimize_response_node) # 新增優化節點
 
         # 定義流程邊
         workflow.set_entry_point("initialize")  # 從初始化開始
@@ -468,9 +476,12 @@ class GraphBuilder:
             self.should_continue,
             {
                 "tools": "tools",
-                END: END
+                "optimize": "optimize_response"
             }
         )
+
+        # 優化完成後結束
+        workflow.add_edge("optimize_response", END)
 
         # 工具執行完 -> 增加計數 -> 回到 generate
         workflow.add_edge("tools", "increment_count")
